@@ -4,6 +4,7 @@ import { jsonToGraphQLQuery } from 'json-to-graphql-query';
 import { SubscriptionClient } from 'graphql-subscriptions-client';
 import { GraphQLClient } from 'graphql-request';
 import { firstLetterLowerCase } from '@nmxjs/utils/dist/FirstLetterLowerCase';
+import { sleep } from '@nmxjs/utils/dist/Sleep';
 import { ICreateGraphqlClientOptions } from '../interfaces';
 import { introspectionQuery, query, mutation, subscription } from '../constants';
 import { findTypeName } from './findTypeName';
@@ -12,142 +13,179 @@ if (typeof window === 'undefined') {
   global.WebSocket = require('ws');
 }
 
-export async function createGraphqlClient<T extends object>({
+export function createGraphqlClient<T extends object>({
   ws,
   url,
   splitter = '0',
   wsGetConnectionParams = async () => ({}),
-}: ICreateGraphqlClientOptions<T>): Promise<T> {
-  const client = new GraphQLClient(url, {
-    credentials: 'include',
-  });
-  let socketClient: SubscriptionClient;
-
-  const {
-    __schema: { types },
-  }: any = await client.request(introspectionQuery);
-
+}: ICreateGraphqlClientOptions<T>): T {
+  let isLoad = false;
+  let error: Error;
   const apiService: any = {};
-  const rootTypes = types.filter(v => [query, mutation, subscription].includes(v.name));
-  const wsStore: Record<string, Function[]> = {};
-  const wsLocker: Record<string, string[]> = {};
+  const proxyApiService = new Proxy(apiService, {
+    get: (_, key) =>
+      isLoad
+        ? apiService[key]
+        : new Proxy(
+            {},
+            {
+              get:
+                (__, methodKey) =>
+                async (...params) => {
+                  while (!isLoad) {
+                    await sleep({
+                      time: 50,
+                    });
+                  }
 
-  rootTypes.forEach(type => {
-    type.fields.forEach(field => {
-      const fields = {};
+                  if (error) {
+                    throw error;
+                  }
 
-      const recursFields = (data, nesting: string[]) => {
-        if (data.kind === 'OBJECT') {
-          data.fields.forEach(f => {
-            const typeName = findTypeName(f.type);
-            recursFields(
-              types.find(v => v.name === typeName),
-              [...nesting, f.name],
-            );
-          });
-          return;
-        }
-
-        if (!nesting.length) {
-          return;
-        }
-
-        lodash.set(fields, nesting.join('.'), true);
-      };
-
-      const typeName = findTypeName(field.type);
-      recursFields(
-        types.find(v => v.name === typeName),
-        [],
-      );
-
-      const queryType = firstLetterLowerCase({ str: type.name });
-      const query = jsonToGraphQLQuery(
-        !field.args[0]
-          ? {
-              [queryType]: {
-                [field.name]: fields,
-              },
-            }
-          : {
-              [`${queryType} ${field.name}($request: ${field.args[0].type.ofType.name}!)`]: {
-                [`${field.name}(request: $request)`]: fields,
-              },
+                  return apiService[key][methodKey](...params);
+                },
             },
-      );
+          ),
+  });
 
-      lodash.set(
-        apiService,
-        field.name
-          .split(splitter)
-          .map(str => firstLetterLowerCase({ str }))
-          .join('.'),
-        type.name === subscription
-          ? request =>
-              ws
-                ? new Observable(subscriber => {
-                    if (!wsLocker[query]) {
-                      wsLocker[query] = [];
-                    }
+  (async () => {
+    const client = new GraphQLClient(url, {
+      credentials: 'include',
+    });
+    let socketClient: SubscriptionClient;
 
-                    if (!wsStore[query]) {
-                      wsStore[query] = [];
-                    }
+    const {
+      __schema: { types },
+    }: any = await client.request(introspectionQuery).catch(e => {
+      isLoad = true;
+      error = e;
+      throw e;
+    });
 
-                    const index = wsLocker[query].push(query);
+    const rootTypes = types.filter(v => [query, mutation, subscription].includes(v.name));
+    const wsStore: Record<string, Function[]> = {};
+    const wsLocker: Record<string, string[]> = {};
 
-                    const callback = data => subscriber.next(data[field.name]);
+    rootTypes.forEach(type => {
+      type.fields.forEach(field => {
+        const fields = {};
 
-                    wsStore[query].push(callback);
+        const recursFields = (data, nesting: string[]) => {
+          if (data.kind === 'OBJECT') {
+            data.fields.forEach(f => {
+              const typeName = findTypeName(f.type);
+              recursFields(
+                types.find(v => v.name === typeName),
+                [...nesting, f.name],
+              );
+            });
+            return;
+          }
 
-                    if (index !== 1) {
+          if (!nesting.length) {
+            return;
+          }
+
+          lodash.set(fields, nesting.join('.'), true);
+        };
+
+        const typeName = findTypeName(field.type);
+        recursFields(
+          types.find(v => v.name === typeName),
+          [],
+        );
+
+        const queryType = firstLetterLowerCase({ str: type.name });
+        const query = jsonToGraphQLQuery(
+          !field.args[0]
+            ? {
+                [queryType]: {
+                  [field.name]: fields,
+                },
+              }
+            : {
+                [`${queryType} ${field.name}($request: ${field.args[0].type.ofType.name}!)`]: {
+                  [`${field.name}(request: $request)`]: fields,
+                },
+              },
+        );
+
+        lodash.set(
+          apiService,
+          field.name
+            .split(splitter)
+            .map(str => firstLetterLowerCase({ str }))
+            .join('.'),
+          type.name === subscription
+            ? request =>
+                ws
+                  ? new Observable(subscriber => {
+                      if (!wsLocker[query]) {
+                        wsLocker[query] = [];
+                      }
+
+                      if (!wsStore[query]) {
+                        wsStore[query] = [];
+                      }
+
+                      const index = wsLocker[query].push(query);
+
+                      const callback = data => subscriber.next(data[field.name]);
+
+                      wsStore[query].push(callback);
+
+                      if (index !== 1) {
+                        return () => {
+                          wsStore[query].splice(
+                            wsStore[query].findIndex(v => v === callback),
+                            1,
+                          );
+                        };
+                      }
+
+                      const wsRequest = socketClient
+                        .request({
+                          query,
+                          variables: { request },
+                        })
+                        .subscribe({
+                          next: req => wsStore[query].forEach(c => c(req.data)),
+                        });
                       return () => {
-                        wsStore[query].splice(
-                          wsStore[query].findIndex(v => v === callback),
-                          1,
-                        );
+                        wsRequest.unsubscribe();
+                        wsLocker[query] = [];
+                        wsStore[query] = [];
                       };
-                    }
-
-                    const wsRequest = socketClient
-                      .request({
-                        query,
-                        variables: { request },
-                      })
-                      .subscribe({
-                        next: req => wsStore[query].forEach(c => c(req.data)),
-                      });
-                    return () => {
-                      wsRequest.unsubscribe();
-                      wsLocker[query] = [];
-                      wsStore[query] = [];
-                    };
+                    })
+                  : null
+            : async (request = {}) =>
+                client
+                  .request(query, {
+                    request,
                   })
-                : null
-          : async request =>
-              client
-                .request(query, {
-                  request,
-                })
-                .then(res => res[field.name]),
-      );
+                  .then(res => res[field.name]),
+        );
+      });
     });
-  });
 
-  if (!ws) {
-    return apiService;
-  }
+    if (!ws) {
+      isLoad = true;
+      return apiService;
+    }
 
-  const connectionParams = await wsGetConnectionParams(apiService);
+    const connectionParams = await wsGetConnectionParams(apiService);
 
-  await new Promise<void>((resolve, reject) => {
-    socketClient = new SubscriptionClient(url.replace('https', 'wss').replace('http', 'ws'), {
-      reconnect: false,
-      lazy: false,
-      connectionCallback: (error: any) => (error ? reject(error) : resolve()),
-      connectionParams,
+    await new Promise<void>((resolve, reject) => {
+      socketClient = new SubscriptionClient(url.replace('https', 'wss').replace('http', 'ws'), {
+        reconnect: false,
+        lazy: false,
+        connectionCallback: (error: any) => (error ? reject(error) : resolve()),
+        connectionParams,
+      });
     });
-  });
 
-  return apiService;
+    isLoad = true;
+  })();
+
+  return proxyApiService;
 }

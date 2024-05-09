@@ -1,6 +1,6 @@
 {
   "name": "@nmxjs/graphql",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -27,9 +27,11 @@
   },
   "dependencies": {
     "@nmxjs/utils": "^1.0.15",
+    "graphql": "^16.8.1",
     "graphql-request": "^5.2.0",
     "graphql-subscriptions-client": "^0.16.4",
     "json-to-graphql-query": "^2.2.5",
-    "lodash": "^4.17.21"
+    "lodash": "^4.17.21",
+    "ws": "^8.17.0"
   }
 }

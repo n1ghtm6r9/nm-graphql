@@ -10,7 +10,9 @@ import { introspectionQuery, query, mutation, subscription } from '../constants'
 import { findTypeName } from './findTypeName';
 
 if (typeof window === 'undefined') {
-  global.WebSocket = require('ws');
+  Object.defineProperties(global, {
+    WebSocket: require('ws'),
+  });
 }
 
 export function createGraphqlClient<T extends object>({

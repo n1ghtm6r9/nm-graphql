@@ -1,0 +1,31 @@
+name: Npm Publish
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  containerize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone files
+        uses: actions/checkout@v3
+
+      - name: Use node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18.18.0
+          cache: 'yarn'
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build
+        run: yarn build
+
+      - name: Publish
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{secrets.NPM_AUTH_TOKEN}}

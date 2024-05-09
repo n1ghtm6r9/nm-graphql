@@ -1,0 +1,35 @@
+{
+  "name": "@nmxjs/graphql",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "start": "echo [@nmxjs/graphql has no start script]",
+    "clear": "rm -rf dist",
+    "build": "yarn clear; tsc",
+    "test": "jest --config=jest.config.js --runInBand --passWithNoTests"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/n1ghtm6r9/nm-utils.git"
+  },
+  "keywords": [],
+  "author": "N1ghtm6r9",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/n1ghtm6r9/nm-utils/issues"
+  },
+  "homepage": "https://github.com/n1ghtm6r9/nm-utils#readme",
+  "devDependencies": {
+    "@types/node": "^20.10.4",
+    "typescript": "^5.1.6"
+  },
+  "dependencies": {
+    "@nmxjs/utils": "^1.0.15",
+    "graphql-request": "^5.2.0",
+    "graphql-subscriptions-client": "^0.16.4",
+    "json-to-graphql-query": "^2.2.5",
+    "lodash": "^4.17.21"
+  }
+}
